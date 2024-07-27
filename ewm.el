@@ -4,6 +4,7 @@
 
 ;; TODO add window alist configuration
 ;; TODO curstom behaviour on M-h and M-l
+;; TODO look into winner
 ;; if there are 2 windows one at the top, and one at the bottom
 
 ;; We all know about EXWM, where Emacs becomes an X window manager. 
@@ -102,21 +103,25 @@
         (select-window next)))))
 
 (defun ewm-smart-split-down ()
-  "Switch to the next window, or if only one window, split horizontally and focus below."
+  "Cycle through buffers or split the window down depending on the mode."
   (interactive)
-  (if (= (length (window-list)) 1)
-      (progn
-        (split-window-below)
-        (windmove-down))
-    (other-window 1)))
+  (if ewm-monocle-state
+      (ewm-monocle-cycle-buffer 'next)
+    (if (= (length (window-list)) 1)
+        (progn
+          (split-window-below)
+          (windmove-down))
+      (other-window 1))))
 
 (defun ewm-smart-split-up ()
-  "Switch to the previous window, or if only one window, split horizontally and focus above."
+  "Cycle through buffers or split the window up depending on the mode."
   (interactive)
-  (if (= (length (window-list)) 1)
-      (progn
-        (split-window-below))
-    (other-window -1)))
+  (if ewm-monocle-state
+      (ewm-monocle-cycle-buffer 'prev)
+    (if (= (length (window-list)) 1)
+        (progn
+          (split-window-below))
+      (other-window -1))))
 
 (defun ewm-smart-split-left ()
   "If there is only one window, split vertically and focus left. Otherwise, shrink window horizontally."
@@ -180,20 +185,41 @@ Provides various functions for window splitting, swapping, and deleting."
   (define-key ewm-override-map (kbd "M-TAB") 'eyebrowse-last-window-config))
 
 ;;; MONOCLE
+
 (defvar ewm-monocle-state nil
   "Current window configuration.
 Intended for use by `ewm-monocle'.")
 
+(defvar ewm-monocle-buffers nil
+  "List of buffers visible before entering monocle mode.")
+
 (defun ewm-monocle ()
   "Toggle between multiple windows and single window.
-This is the equivalent of maximizing a window. Tiling window
-managers such as DWM, BSPWM refer to this state as 'monocle'."
+   This is the equivalent of maximizing a window. Tiling window managers such as DWM, BSPWM refer to this state as 'monocle'."
   (interactive)
   (if (one-window-p)
       (when ewm-monocle-state
-        (set-window-configuration ewm-monocle-state))
+        (set-window-configuration ewm-monocle-state)
+        (setq ewm-monocle-state nil)
+        (setq ewm-monocle-buffers nil))
     (setq ewm-monocle-state (current-window-configuration))
+    (setq ewm-monocle-buffers (mapcar 'window-buffer (window-list)))
     (delete-other-windows)))
+
+
+(defun ewm-monocle-cycle-buffer (direction)
+  "Cycle through buffers in MONOCLE mode based on DIRECTION.
+DIRECTION should be 'next or 'prev."
+  (let* ((current-buffer (window-buffer (selected-window)))
+         (buffers ewm-monocle-buffers)
+         (current-index (cl-position current-buffer buffers :test 'eq))
+         (count (length buffers))
+         (new-index (pcase direction
+                      ('next (mod (1+ current-index) count))
+                      ('prev (mod (1- current-index) count))))
+         (new-buffer (nth new-index buffers)))
+    (set-window-buffer (selected-window) new-buffer)))
+
 
 (provide 'ewm)
 
