@@ -4,8 +4,9 @@
 
 ;; TODO add window alist configuration
 ;; TODO curstom behaviour on M-h and M-l
-;; TODO look into winner
 ;; if there are 2 windows one at the top, and one at the bottom
+;; TODO fix M-q in monocle
+;; TODO foxus the correct window when exiting from monocle
 
 ;; We all know about EXWM, where Emacs becomes an X window manager. 
 ;; EWM does not try to do the same thing. Instead, EWM is a window manager 
@@ -102,44 +103,69 @@
         (set-window-start next current-pos)
         (select-window next)))))
 
+
+
+(defun ewm-smart-split-open-header ()
+  "If the current file is a C source file, check if a matching header file exists, 
+   and if so, open it in the other window after splitting."
+  (let* ((current-file (buffer-file-name))
+         (file-base (and current-file
+                         (string-match "\\(.+\\)\\.c\\'" current-file)
+                         (match-string 1 current-file)))
+         (header-file (and file-base (concat file-base ".h"))))
+    (when (and header-file (file-exists-p header-file))
+      (find-file header-file))))
+
 (defun ewm-smart-split-down ()
-  "Cycle through buffers or split the window down depending on the mode."
+  "Cycle through buffers or split the window down depending on the mode.
+   If the current buffer is a C file, check if a matching header file exists and open it."
   (interactive)
   (if ewm-monocle-state
       (ewm-monocle-cycle-buffer 'next)
     (if (= (length (window-list)) 1)
         (progn
           (split-window-below)
-          (windmove-down))
-      (other-window 1))))
+          (windmove-down)
+          (ewm-smart-split-open-header))
+      (progn
+        (other-window 1)))))
 
 (defun ewm-smart-split-up ()
-  "Cycle through buffers or split the window up depending on the mode."
+  "Cycle through buffers or split the window up depending on the mode.
+   If the current buffer is a C file, check if a matching header file exists and open it."
   (interactive)
   (if ewm-monocle-state
       (ewm-monocle-cycle-buffer 'prev)
     (if (= (length (window-list)) 1)
         (progn
-          (split-window-below))
-      (other-window -1))))
+          (split-window-below)
+          (ewm-smart-split-open-header))
+      (progn
+        (other-window -1)))))
 
 (defun ewm-smart-split-left ()
-  "If there is only one window, split vertically and focus left. Otherwise, shrink window horizontally."
+  "If there is only one window, split vertically and focus left.
+   If the current buffer is a C file, check if a matching header file exists and open it.
+   Otherwise, shrink window horizontally."
   (interactive)
   (if (= (length (window-list)) 1)
       (progn
-        (split-window-right))
+        (split-window-right)
+        (ewm-smart-split-open-header))
     (if (window-at-side-p (selected-window) 'right)
         (enlarge-window-horizontally 5)
       (shrink-window-horizontally 5))))
 
 (defun ewm-smart-split-right ()
-  "If there is only one window, split vertically and focus right. Otherwise, enlarge window horizontally."
+  "If there is only one window, split vertically and focus right.
+   If the current buffer is a C file, check if a matching header file exists and open it.
+   Otherwise, enlarge window horizontally."
   (interactive)
   (if (= (length (window-list)) 1)
       (progn
         (split-window-right)
-        (windmove-right))
+        (windmove-right)
+        (ewm-smart-split-open-header))
     (if (window-at-side-p (selected-window) 'right)
         (shrink-window-horizontally 5)
       (enlarge-window-horizontally 5))))
