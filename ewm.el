@@ -2,55 +2,55 @@
 
 ;;; Commentary:
 
-;; TODO add window alist configuration
-;; TODO curstom behaviour on M-h and M-l
-;; if there are 2 windows one at the top, and one at the bottom
-;; TODO fix M-q in monocle
+;; TODO popper system
+;; TODO window alist
 ;; TODO foxus the correct window when exiting from monocle
+;; FIX  M-q in monocle
 
 ;; We all know about EXWM, where Emacs becomes an X window manager. 
 ;; EWM does not try to do the same thing. Instead, EWM is a window manager 
 ;; inside Emacs, not Emacs becoming a window manager.
 
 
-;;      1 2 3 4 5 6 7 8 9 (workspaces)
-;;    
-;;         (split/previous)
-;;     (quit) q  k  TAB (last-workspace)
-;;             \ ^ /
-;; (s/res) h  <- M -> l  (split/resize)
-;;               v \
-;;               j  SPC (Monocle)
-;;         (split/next)
+;;               1 2 3 4 5 6 7 8 9 (workspaces)
+;;                        ^ UP
+;;                  (split/previous)
+;;              (quit) q  k  TAB (last-workspace)
+;;                      \ ^ /
+;;   < LEFT (s/res) h  <- M -> l  (split/resize) > RIGHT
+;;                        v \
+;;                        j  SPC (Monocle)
+;;                  (split/next)
+;;                        v DOWN
 
-;; Almost every keybind behaves differently depending on whether there is 
-;; only one window in the current workspace or more than one.
+
+;; Almost every keybind behaves differently if there is one window in the current workspace or more than one.
 
 ;;; Code:
 
 (defvar ewm-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "M-j") 'ewm-smart-split-down)
-    (define-key map (kbd "M-k") 'ewm-smart-split-up)
-    (define-key map (kbd "M-h") 'ewm-smart-split-left)
-    (define-key map (kbd "M-l") 'ewm-smart-split-right)
+    (define-key map (kbd "M-j") 'ewm-down)
+    (define-key map (kbd "M-k") 'ewm-up)
+    (define-key map (kbd "M-h") 'ewm-left)
+    (define-key map (kbd "M-l") 'ewm-right)
     (define-key map (kbd "M-J") 'ewm-swap-with-next-window)
     (define-key map (kbd "M-K") 'ewm-swap-with-prev-window)
-    (define-key map (kbd "M-q") 'ewm-smart-delete-window)
-    (define-key map (kbd "M-SPC") 'ewm-monocle)
+    (define-key map (kbd "M-q") 'ewm-delete-window)
+    ;; (define-key map (kbd "M-SPC") 'ewm-monocle)
     map)
   "Keymap for `ewm-mode`.")
 
 (defvar ewm-override-map (make-sparse-keymap)
   "Keymap for overriding major mode keybindings.")
 
-(define-key ewm-override-map (kbd "M-j") 'ewm-smart-split-down)
-(define-key ewm-override-map (kbd "M-k") 'ewm-smart-split-up)
-(define-key ewm-override-map (kbd "M-h") 'ewm-smart-split-left)
-(define-key ewm-override-map (kbd "M-l") 'ewm-smart-split-right)
-(define-key ewm-override-map (kbd "M-J") 'ewm-swap-with-next-window)
-(define-key ewm-override-map (kbd "M-K") 'ewm-swap-with-prev-window)
-(define-key ewm-override-map (kbd "M-q") 'ewm-smart-delete-window)
+(define-key ewm-override-map (kbd "M-j") 'ewm-down)
+(define-key ewm-override-map (kbd "M-k") 'ewm-up)
+(define-key ewm-override-map (kbd "M-h") 'ewm-left)
+(define-key ewm-override-map (kbd "M-l") 'ewm-right)
+(define-key ewm-override-map (kbd "M-J") (lambda () (interactive) (ewm-rotate-stack 'next)))
+(define-key ewm-override-map (kbd "M-K") (lambda () (interactive) (ewm-rotate-stack 'prev)))
+(define-key ewm-override-map (kbd "M-q") 'ewm-delete-window)
 (define-key ewm-override-map (kbd "M-SPC") 'ewm-monocle)
 
 (defun ewm-activate-override-map ()
@@ -59,53 +59,113 @@
 
 (add-hook 'ewm-mode-hook 'ewm-activate-override-map)
 
-(defun ewm-swap-with-prev-window ()
-  "Swap the current window with the previous one,
-   open 'scratch-buffer' if only one window."
+(defun ewm-down ()
+  "Cycle through buffers or split the window down depending on the mode.
+   If the current buffer is a C file, check if a matching header file exists and open it."
+  (interactive)
+  (if ewm-monocle-state
+      (ewm-monocle-cycle-buffer 'next)
+    (if (= (length (window-list)) 1)
+        (progn
+          (split-window-below)
+          (windmove-down)
+          (ewm-open-header))
+      (progn
+        (other-window 1)))))
+
+(defun ewm-up ()
+  "Cycle through buffers or split the window up depending on the mode.
+   If the current buffer is a C file, check if a matching header file exists and open it."
+  (interactive)
+  (if ewm-monocle-state
+      (ewm-monocle-cycle-buffer 'prev)
+    (if (= (length (window-list)) 1)
+        (progn
+          (split-window-below)
+          (ewm-open-header))
+      (progn
+        (other-window -1)))))
+
+(defun ewm-left ()
+  "If there is only one window, split vertically and focus left.
+   If the current buffer is a C file, check if a matching header file exists and open it.
+   Otherwise, shrink window horizontally."
+  (interactive)
+  (if (= (length (window-list)) 1)
+      (progn
+        (split-window-right)
+        (ewm-open-header))
+    (if (= (window-pixel-left (selected-window))
+           (window-pixel-left (next-window)))
+        ;; Vertical arrangement - resize height
+        (if (window-at-side-p (selected-window) 'bottom)
+            (enlarge-window 5)
+          (shrink-window 5))
+      ;; Horizontal arrangement - resize width
+      (if (window-at-side-p (selected-window) 'right)
+          (enlarge-window-horizontally 5)
+        (shrink-window-horizontally 5)))))
+
+(defun ewm-right ()
+  "If there is only one window, split vertically and focus right.
+   If the current buffer is a C file, check if a matching header file exists and open it.
+   Otherwise, enlarge window horizontally."
+  (interactive)
+  (if (= (length (window-list)) 1)
+      (progn
+        (split-window-right)
+        (windmove-right)
+        (ewm-open-header))
+    (if (= (window-pixel-left (selected-window))
+           (window-pixel-left (next-window)))
+        ;; Vertical arrangement - resize height
+        (if (window-at-side-p (selected-window) 'bottom)
+            (shrink-window 5)
+          (enlarge-window 5))
+      ;; Horizontal arrangement - resize width
+      (if (window-at-side-p (selected-window) 'right)
+          (shrink-window-horizontally 5)
+        (enlarge-window-horizontally 5)))))
+
+
+(defun ewm-delete-window ()
+  "Delete the current window, or kill the buffer if it's the only window.
+Also kills the buffer if it's named '*haskell*' even if there are multiple windows."
+  (interactive)
+  (if (or (string= (buffer-name) "*haskell*")
+          (= (length (window-list)) 1))
+      (kill-buffer (current-buffer))
+    (delete-window)))
+
+(defun ewm-rotate-stack (direction)
+  "Swap the current window with the window in DIRECTION ('next or 'prev).
+When there's only one window, split and open scratch-buffer for 'prev
+or eshell for 'next."
   (interactive)
   (if (= (length (window-list)) 1)
       (progn
         (split-window-below)
         (other-window 1)
-        (scratch-buffer))
+        (if (eq direction 'prev)
+            (scratch-buffer)
+          (eshell)))
     (let* ((current (selected-window))
-           (prev (previous-window))
+           (other-window (if (eq direction 'prev)
+                             (previous-window)
+                           (next-window)))
            (current-buf (window-buffer current))
-           (prev-buf (window-buffer prev))
+           (other-buf (window-buffer other-window))
            (current-pos (window-start current))
-           (prev-pos (window-start prev)))
-      (unless (eq current prev)
-        (set-window-buffer current prev-buf)
-        (set-window-buffer prev current-buf)
-        (set-window-start current prev-pos)
-        (set-window-start prev current-pos)
-        (select-window prev)))))
-
-(defun ewm-swap-with-next-window ()
-  "Swap the current window with the next one,
-   open 'eshell' if only one window."
-  (interactive)
-  (if (= (length (window-list)) 1)
-      (progn
-        (split-window-below)
-        (other-window 1)
-        (eshell))
-    (let* ((current (selected-window))
-           (next (next-window))
-           (current-buf (window-buffer current))
-           (next-buf (window-buffer next))
-           (current-pos (window-start current))
-           (next-pos (window-start next)))
-      (unless (eq current next)
-        (set-window-buffer current next-buf)
-        (set-window-buffer next current-buf)
-        (set-window-start current next-pos)
-        (set-window-start next current-pos)
-        (select-window next)))))
+           (other-pos (window-start other-window)))
+      (unless (eq current other-window)
+        (set-window-buffer current other-buf)
+        (set-window-buffer other-window current-buf)
+        (set-window-start current other-pos)
+        (set-window-start other-window current-pos)
+        (select-window other-window)))))
 
 
-
-(defun ewm-smart-split-open-header ()
+(defun ewm-open-header ()
   "If the current file is a C source file, check if a matching header file exists, 
    and if so, open it in the other window after splitting."
   (let* ((current-file (buffer-file-name))
@@ -116,66 +176,7 @@
     (when (and header-file (file-exists-p header-file))
       (find-file header-file))))
 
-(defun ewm-smart-split-down ()
-  "Cycle through buffers or split the window down depending on the mode.
-   If the current buffer is a C file, check if a matching header file exists and open it."
-  (interactive)
-  (if ewm-monocle-state
-      (ewm-monocle-cycle-buffer 'next)
-    (if (= (length (window-list)) 1)
-        (progn
-          (split-window-below)
-          (windmove-down)
-          (ewm-smart-split-open-header))
-      (progn
-        (other-window 1)))))
 
-(defun ewm-smart-split-up ()
-  "Cycle through buffers or split the window up depending on the mode.
-   If the current buffer is a C file, check if a matching header file exists and open it."
-  (interactive)
-  (if ewm-monocle-state
-      (ewm-monocle-cycle-buffer 'prev)
-    (if (= (length (window-list)) 1)
-        (progn
-          (split-window-below)
-          (ewm-smart-split-open-header))
-      (progn
-        (other-window -1)))))
-
-(defun ewm-smart-split-left ()
-  "If there is only one window, split vertically and focus left.
-   If the current buffer is a C file, check if a matching header file exists and open it.
-   Otherwise, shrink window horizontally."
-  (interactive)
-  (if (= (length (window-list)) 1)
-      (progn
-        (split-window-right)
-        (ewm-smart-split-open-header))
-    (if (window-at-side-p (selected-window) 'right)
-        (enlarge-window-horizontally 5)
-      (shrink-window-horizontally 5))))
-
-(defun ewm-smart-split-right ()
-  "If there is only one window, split vertically and focus right.
-   If the current buffer is a C file, check if a matching header file exists and open it.
-   Otherwise, enlarge window horizontally."
-  (interactive)
-  (if (= (length (window-list)) 1)
-      (progn
-        (split-window-right)
-        (windmove-right)
-        (ewm-smart-split-open-header))
-    (if (window-at-side-p (selected-window) 'right)
-        (shrink-window-horizontally 5)
-      (enlarge-window-horizontally 5))))
-
-(defun ewm-smart-delete-window ()
-  "Delete the current window, or kill the buffer if it's the only window."
-  (interactive)
-  (if (> (length (window-list)) 1)
-      (delete-window)
-    (kill-buffer (current-buffer))))
 
 ;;;###autoload
 (define-minor-mode ewm-mode

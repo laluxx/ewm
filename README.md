@@ -1,6 +1,6 @@
 # EWM
 
-A window manager living inside emacs
+window manager for emacs
 
 
 
