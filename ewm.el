@@ -2,17 +2,15 @@
 
 ;;; Commentary:
 
-;; TODO popper system
-;; TODO window alist
 ;; TODO foxus the correct window when exiting from monocle
-;; FIX  M-q in monocle
+;; TODO M-l in dired on a directory should open that directory in the other window
 
 ;; We all know about EXWM, where Emacs becomes an X window manager. 
 ;; EWM does not try to do the same thing. Instead, EWM is a window manager 
 ;; inside Emacs, not Emacs becoming a window manager.
 
 
-;;               1 2 3 4 5 6 7 8 9 (workspaces)
+;;             1 2 3 4 5 6 7 8 9 (workspaces)
 ;;                        ^ UP
 ;;                  (split/previous)
 ;;              (quit) q  k  TAB (last-workspace)
@@ -22,7 +20,6 @@
 ;;                        j  SPC (Monocle)
 ;;                  (split/next)
 ;;                        v DOWN
-
 
 ;; Almost every keybind behaves differently if there is one window in the current workspace or more than one.
 
@@ -40,6 +37,9 @@
     ;; (define-key map (kbd "M-SPC") 'ewm-monocle)
     map)
   "Keymap for `ewm-mode`.")
+
+(defvar ewm-skip-windows t
+  "If non-nil, use smart navigation behavior skipping windows.")
 
 (defvar ewm-override-map (make-sparse-keymap)
   "Keymap for overriding major mode keybindings.")
@@ -59,73 +59,161 @@
 
 (add-hook 'ewm-mode-hook 'ewm-activate-override-map)
 
+
+(defun ewm-movable-window-list ()
+  "Return a list of movable windows, excluding fixed-width side windows."
+  (seq-filter (lambda (window)
+                (not (or (window-parameter window 'window-side)
+                         (window-parameter window 'window-fixed-size))))
+              (window-list)))
+
+
 (defun ewm-down ()
   "Cycle through buffers or split the window down depending on the mode.
-   If the current buffer is a C file, check if a matching header file exists and open it."
+   If ewm-skip-windows is non-nil, use advanced behavior."
   (interactive)
   (if ewm-monocle-state
       (ewm-monocle-cycle-buffer 'next)
-    (if (= (length (window-list)) 1)
-        (progn
-          (split-window-below)
-          (windmove-down)
-          (ewm-open-header))
-      (progn
+    (if ewm-skip-windows
+        (let ((movable-windows (ewm-movable-window-list))
+              (all-windows (window-list)))
+          (cond
+           ;; Only one movable window
+           ((= (length movable-windows) 1)
+            (if (= (length all-windows) 1)
+                (progn  ; truly only one window
+                  (split-window-below)
+                  (windmove-down)
+                  (ewm-open-header))
+              (progn  ; one movable and one fixed (e.g., Treemacs)
+                (other-window 1))))
+           ;; Multiple movable windows
+           (t
+            (let ((next-window (next-window)))
+              (while (and (not (eq next-window (selected-window)))
+                          (not (member next-window movable-windows)))
+                (setq next-window (next-window next-window)))
+              (select-window next-window)))))
+      (if (= (length (window-list)) 1)
+          (progn
+            (split-window-below)
+            (windmove-down)
+            (ewm-open-header))
         (other-window 1)))))
 
 (defun ewm-up ()
   "Cycle through buffers or split the window up depending on the mode.
-   If the current buffer is a C file, check if a matching header file exists and open it."
+   If ewm-skip-windows is non-nil, use advanced behavior."
   (interactive)
   (if ewm-monocle-state
       (ewm-monocle-cycle-buffer 'prev)
-    (if (= (length (window-list)) 1)
-        (progn
-          (split-window-below)
-          (ewm-open-header))
-      (progn
+    (if ewm-skip-windows
+        (let ((movable-windows (ewm-movable-window-list))
+              (all-windows (window-list)))
+          (cond
+           ;; Only one movable window
+           ((= (length movable-windows) 1)
+            (if (= (length all-windows) 1)
+                (progn  ; truly only one window
+                  (split-window-below)
+                  (ewm-open-header))
+              (progn  ; one movable and one fixed (e.g., Treemacs)
+                (other-window -1))))
+           ;; Multiple movable windows
+           (t
+            (let ((prev-window (previous-window)))
+              (while (and (not (eq prev-window (selected-window)))
+                          (not (member prev-window movable-windows)))
+                (setq prev-window (previous-window prev-window)))
+              (select-window prev-window)))))
+      (if (= (length (window-list)) 1)
+          (progn
+            (split-window-below)
+            (ewm-open-header))
         (other-window -1)))))
 
 (defun ewm-left ()
-  "If there is only one window, split vertically and focus left.
-   If the current buffer is a C file, check if a matching header file exists and open it.
-   Otherwise, shrink window horizontally."
+  "If there is only one movable window, split vertically and focus left.
+   If ewm-skip-windows is non-nil, use advanced behavior."
   (interactive)
-  (if (= (length (window-list)) 1)
-      (progn
-        (split-window-right)
-        (ewm-open-header))
-    (if (= (window-pixel-left (selected-window))
-           (window-pixel-left (next-window)))
-        ;; Vertical arrangement - resize height
-        (if (window-at-side-p (selected-window) 'bottom)
-            (enlarge-window 5)
-          (shrink-window 5))
-      ;; Horizontal arrangement - resize width
-      (if (window-at-side-p (selected-window) 'right)
-          (enlarge-window-horizontally 5)
-        (shrink-window-horizontally 5)))))
+  (if ewm-skip-windows
+      (let ((movable-windows (ewm-movable-window-list)))
+        (if (= (length movable-windows) 1)
+            (progn
+              (split-window-right)
+              (ewm-open-header))
+          (let ((current-window (selected-window)))
+            (if (or (not (member current-window movable-windows))
+                    (= (window-pixel-left current-window)
+                       (window-pixel-left (car (remove current-window movable-windows)))))
+                ;; Vertical arrangement or non-movable window - resize height
+                (if (window-at-side-p current-window 'bottom)
+                    (enlarge-window 5)
+                  (shrink-window 5))
+              ;; Horizontal arrangement - resize width
+              (if (window-at-side-p current-window 'right)
+                  (enlarge-window-horizontally 5)
+                (shrink-window-horizontally 5))))))
+    (if (= (length (window-list)) 1)
+        (progn
+          (split-window-right)
+          (ewm-open-header))
+      (if (= (window-pixel-left (selected-window))
+             (window-pixel-left (next-window)))
+          ;; Vertical arrangement - resize height
+          (if (window-at-side-p (selected-window) 'bottom)
+              (enlarge-window 5)
+            (shrink-window 5))
+        ;; Horizontal arrangement - resize width
+        (if (window-at-side-p (selected-window) 'right)
+            (enlarge-window-horizontally 5)
+          (shrink-window-horizontally 5))))))
 
 (defun ewm-right ()
-  "If there is only one window, split vertically and focus right.
-   If the current buffer is a C file, check if a matching header file exists and open it.
-   Otherwise, enlarge window horizontally."
+  "If there is only one movable window, split vertically and focus right.
+   If ewm-skip-windows is non-nil, use advanced behavior."
   (interactive)
-  (if (= (length (window-list)) 1)
-      (progn
-        (split-window-right)
-        (windmove-right)
-        (ewm-open-header))
-    (if (= (window-pixel-left (selected-window))
-           (window-pixel-left (next-window)))
-        ;; Vertical arrangement - resize height
-        (if (window-at-side-p (selected-window) 'bottom)
-            (shrink-window 5)
-          (enlarge-window 5))
-      ;; Horizontal arrangement - resize width
-      (if (window-at-side-p (selected-window) 'right)
-          (shrink-window-horizontally 5)
-        (enlarge-window-horizontally 5)))))
+  (if ewm-skip-windows
+      (let ((movable-windows (ewm-movable-window-list)))
+        (if (= (length movable-windows) 1)
+            (progn
+              (split-window-right)
+              (windmove-right)
+              (ewm-open-header))
+          (let ((current-window (selected-window)))
+            (if (or (not (member current-window movable-windows))
+                    (= (window-pixel-left current-window)
+                       (window-pixel-left (car (remove current-window movable-windows)))))
+                ;; Vertical arrangement or non-movable window - resize height
+                (if (window-at-side-p current-window 'bottom)
+                    (shrink-window 5)
+                  (enlarge-window 5))
+              ;; Horizontal arrangement - resize width
+              (if (window-at-side-p current-window 'right)
+                  (shrink-window-horizontally 5)
+                (enlarge-window-horizontally 5))))))
+    (if (= (length (window-list)) 1)
+        (progn
+          (split-window-right)
+          (windmove-right)
+          (ewm-open-header))
+      (if (= (window-pixel-left (selected-window))
+             (window-pixel-left (next-window)))
+          ;; Vertical arrangement - resize height
+          (if (window-at-side-p (selected-window) 'bottom)
+              (shrink-window 5)
+            (enlarge-window 5))
+        ;; Horizontal arrangement - resize width
+        (if (window-at-side-p (selected-window) 'right)
+            (shrink-window-horizontally 5)
+          (enlarge-window-horizontally 5))))))
+
+(defun ewm-toggle-advanced-navigation ()
+  "Toggle between advanced and basic navigation in ewm."
+  (interactive)
+  (setq ewm-skip-windows (not ewm-skip-windows))
+  (message "EWM advanced navigation %s"
+           (if ewm-skip-windows "enabled" "disabled")))
 
 
 (defun ewm-delete-window ()
@@ -197,6 +285,7 @@ Provides various functions for window splitting, swapping, and deleting."
 (use-package eyebrowse
   :ensure t
   :config
+  (setq eyebrowse-mode-line-style nil)
   (setq eyebrowse-tagged-slot-format "%t")
   (eyebrowse-mode t)
 
